@@ -1,0 +1,21 @@
+import fs from "fs";
+
+async function embedInventory(inventory) {
+  const resp = await fetch("http://localhost:4000/api/openai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "text-embedding-3-small",
+      input: inventory.map(i => `${i.codigo} ${i.nombre}`)
+    })
+  });
+
+  const data = await resp.json();
+
+  return inventory.map((item, i) => ({
+    ...item,
+    embedding: data.data[i].embedding
+  }));
+}
