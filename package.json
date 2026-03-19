@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "server": "node server.js",
-    "start": "concurrently \"npm run server\" \"npm run dev\""
+  "dev": "vite",
+  "build": "vite build",
+  "server": "node server.js",
+  "start": "concurrently \"npm run server\" \"npm run dev\""
+
   },
   "dependencies": {
     "cors": "^2.8.5",
