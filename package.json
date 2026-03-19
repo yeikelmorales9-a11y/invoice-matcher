@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build": "vite build",
     "server": "node server.js",
     "start": "concurrently \"npm run server\" \"npm run dev\""
   },
