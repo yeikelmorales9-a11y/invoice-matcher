@@ -6,7 +6,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLi
 
 const API_URL = "/api/openai";
 
-
 // ── PDF ───────────────────────────────────────────────────────────────────────
 function fileToBase64(file) {
   return new Promise((res, rej) => {
