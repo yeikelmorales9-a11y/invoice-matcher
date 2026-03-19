@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import fs from "fs";
 
 async function embedInventory(inventory) {
@@ -18,4 +19,26 @@ async function embedInventory(inventory) {
     ...item,
     embedding: data.data[i].embedding
   }));
+=======
+import fs from "fs";
+
+async function embedInventory(inventory) {
+  const resp = await fetch("http://localhost:4000/api/openai", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "text-embedding-3-small",
+      input: inventory.map(i => `${i.codigo} ${i.nombre}`)
+    })
+  });
+
+  const data = await resp.json();
+
+  return inventory.map((item, i) => ({
+    ...item,
+    embedding: data.data[i].embedding
+  }));
+>>>>>>> 6c00facceee9ac9c4d0a3b57912ca99176b90037
 }
