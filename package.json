@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 {
   "name": "yeikels-app",
   "version": "1.0.0",
@@ -27,7 +26,7 @@
     "vite": "^5.0.0"
   }
 }
-=======
+
 {
   "name": "yeikels-app",
   "version": "1.0.0",
@@ -56,4 +55,3 @@
     "vite": "^5.0.0"
   }
 }
->>>>>>> 6c00facceee9ac9c4d0a3b57912ca99176b90037
