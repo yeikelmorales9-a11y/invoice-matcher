@@ -490,15 +490,15 @@ ${pdfText}`;
                       </td>
                       <td style={{ padding: "9px 12px", color: "#38bdf8", fontWeight: 700, whiteSpace: "nowrap", fontSize: 11 }}>{r.unidad_manejo || "—"}</td>
                       <td style={{ padding: "9px 12px", color: "#7dd3fc", whiteSpace: "nowrap", fontSize: 11 }}>{r.unidad_subpartida || "—"}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", color: "#86efac", fontSize: 11 }}>{r.valor_cop != null ? fmtNum(r.valor_cop) : "—"}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", color: "#86efac", fontSize: 11 }}>{r.valor_cop != null ? fmtNum(r.valor_cop, 0) : "—"}</td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 800, color: "#4ade80", fontSize: 12 }}>
                         {r.valor_usd != null ? fmtNum(r.valor_usd) : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", color: "#c4b5fd", fontSize: 11 }}>
-                        {r.peso_kg != null ? <span style={{ background: "rgba(139,92,246,0.15)", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_kg)} kg</span> : "—"}
+                        {r.peso_kg != null ? <span style={{ background: "rgba(139,92,246,0.15)", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_kg, 3)} kg</span> : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: 12 }}>
-                        {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_total)} kg</span> : "—"}
+                        {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_total, 3)} kg</span> : "—"}
                       </td>
                       <td style={{ padding: "9px 12px" }}><StatusBadge status={r.status} /></td>
                     </tr>
