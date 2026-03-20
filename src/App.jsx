@@ -4,7 +4,8 @@ import * as pdfjsLib from "pdfjs-dist";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.mjs`;
 
-const API_URL = "http://localhost:4000/api/openai";
+const API_URL = "/api/openai";
+
 
 // ── PDF ───────────────────────────────────────────────────────────────────────
 function fileToBase64(file) {
