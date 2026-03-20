@@ -162,113 +162,32 @@ Responde SOLO con este JSON sin markdown:
   } catch { return null; }
 }
 
-// ── Export Excel (xlsx-js-style) ──────────────────────────────────────────────
-function exportXLSX(rows, tasa) {
-  const STATUS_LABEL = { found: "Encontrado", verify: "Verificar", notfound: "No encontrado" };
+// ── Helpers de formato ────────────────────────────────────────────────────────
+function fmtNum(val, dec = 6) {
+  if (val == null || val === "") return "";
+  return Number(val).toFixed(dec).replace(".", ",");
+}
 
-  const hStyle = (bg) => ({
-    font:      { bold: true, color: { rgb: "FFFFFF" }, sz: 11, name: "Segoe UI" },
-    fill:      { fgColor: { rgb: bg } },
-    alignment: { horizontal: "center", vertical: "center", wrapText: true },
-    border: {
-      top:    { style: "thin", color: { rgb: "FFFFFF" } },
-      bottom: { style: "thin", color: { rgb: "FFFFFF" } },
-      left:   { style: "thin", color: { rgb: "FFFFFF" } },
-      right:  { style: "thin", color: { rgb: "FFFFFF" } },
-    },
-  });
+// ── Export Excel ──────────────────────────────────────────────────────────────
+function exportXLSX(rows) {
+  const HEADERS = ["Nombre", "Codigo", "Peso Bruto", "Peso Neto", "Cantidad", "Valor Unitario"];
 
-  const cStyle = (bg, text = "1E293B", bold = false, align = "left") => ({
-    font:      { bold, color: { rgb: text }, sz: 10, name: "Segoe UI" },
-    fill:      { fgColor: { rgb: bg } },
-    alignment: { horizontal: align, vertical: "center" },
-    border: {
-      top:    { style: "thin", color: { rgb: "E2E8F0" } },
-      bottom: { style: "thin", color: { rgb: "E2E8F0" } },
-      left:   { style: "thin", color: { rgb: "E2E8F0" } },
-      right:  { style: "thin", color: { rgb: "E2E8F0" } },
-    },
-  });
-
-  const statusStyle = (status) => {
-    const map = {
-      found:    { bg: "DCFCE7", text: "15803D" },
-      verify:   { bg: "FEF9C3", text: "A16207" },
-      notfound: { bg: "FEE2E2", text: "B91C1C" },
-    };
-    const s = map[status] || map.notfound;
-    return cStyle(s.bg, s.text, true, "center");
-  };
-
-  // Headers
-  const HEADERS = [
-    { v: "Descripcion Factura",  s: hStyle("334155") },
-    { v: "Nombre en Sistema",    s: hStyle("334155") },
-    { v: "Codigo",               s: hStyle("334155") },
-    { v: "Cant. Factura",        s: hStyle("4338CA") },
-    { v: "Cant. Ajustada",       s: hStyle("4338CA") },
-    { v: "Nota Cantidad",        s: hStyle("4338CA") },
-    { v: "UM Apollo",            s: hStyle("0369A1") },
-    { v: "Unidad Subpartida",    s: hStyle("0369A1") },
-    { v: "COP Unitario",         s: hStyle("15803D") },
-    { v: "USD Unitario",         s: hStyle("15803D") },
-    { v: "Peso Unit. (KG)",      s: hStyle("7C3AED") },
-    { v: "Peso Total (KG)",      s: hStyle("7C3AED") },
-    { v: "Estado",               s: hStyle("0F172A") },
-  ];
-
-  // Data rows
-  const dataRows = rows.map((r, i) => {
-    const bg       = i % 2 === 0 ? "FFFFFF" : "F8FAFC";
-    const bgBlue   = i % 2 === 0 ? "F0F9FF" : "E0F2FE";
-    const bgGreen  = i % 2 === 0 ? "F0FDF4" : "DCFCE7";
-    const bgPurple = i % 2 === 0 ? "F5F3FF" : "EDE9FE";
-    const hasAdj   = r.cantidad_ajustada != null;
+  const dataRows = rows.map(r => {
+    const cant = r.cantidad_ajustada ?? r.cantidad;
     return [
-      { v: r.desc_factura || "",                                       s: cStyle(bg) },
-      { v: r.nombre_sistema || "NO ENCONTRADO",                        s: cStyle(bg, r.nombre_sistema ? "1E293B" : "B91C1C", !!r.nombre_sistema) },
-      { v: r.codigo || "",                                             s: cStyle(bg, "6366F1", true, "center") },
-      { v: r.cantidad ?? "",                                           s: cStyle(bg, "374151", false, "center") },
-      { v: r.cantidad_ajustada ?? r.cantidad ?? "",                    s: cStyle(hasAdj ? "FEF3C7" : bg, hasAdj ? "B45309" : "374151", hasAdj, "center") },
-      { v: r.nota_cantidad || "",                                      s: cStyle(bg, "6B7280") },
-      { v: r.unidad_manejo || "",                                      s: cStyle(bgBlue, "0369A1", true, "center") },
-      { v: r.unidad_subpartida || "",                                  s: cStyle(bgBlue, "0369A1", false, "center") },
-      { v: r.valor_cop != null ? r.valor_cop : "",                     s: { ...cStyle(bgGreen, "15803D", false, "right"), numFmt: "#,##0" } },
-      { v: r.valor_usd != null ? parseFloat(r.valor_usd.toFixed(4)) : "", s: { ...cStyle(bgGreen, "15803D", true, "right"), numFmt: '"$"#,##0.0000' } },
-      { v: r.peso_kg != null ? r.peso_kg : "",                         s: cStyle(bgPurple, "7C3AED", false, "right") },
-      { v: r.peso_total != null ? r.peso_total : "",                   s: cStyle(bgPurple, "7C3AED", true, "right") },
-      { v: STATUS_LABEL[r.status] || "No encontrado",                  s: statusStyle(r.status) },
+      r.nombre_sistema || r.desc_factura || "",
+      r.codigo || "",
+      fmtNum(r.peso_total),
+      fmtNum(r.peso_total),
+      cant != null ? String(cant).replace(".", ",") : "",
+      fmtNum(r.valor_usd),
     ];
   });
 
-  // Totals row
-  const totalPeso = rows.reduce((s, r) => s + (r.peso_total || 0), 0);
-  const totalUSD  = rows.reduce((s, r) => s + (r.valor_usd && r.cantidad ? r.valor_usd * (r.cantidad_ajustada ?? r.cantidad) : 0), 0);
-  const found    = rows.filter(r => r.status === "found").length;
-  const verify   = rows.filter(r => r.status === "verify").length;
-  const notfound = rows.filter(r => r.status === "notfound").length;
-
-  const totalsRow = [
-    { v: `TOTALES  |  ${found} encontrados · ${verify} verificar · ${notfound} no encontrados`, s: hStyle("0F172A") },
-    { v: "", s: hStyle("0F172A") }, { v: "", s: hStyle("0F172A") },
-    { v: "", s: hStyle("0F172A") }, { v: "", s: hStyle("0F172A") },
-    { v: "", s: hStyle("0F172A") }, { v: "", s: hStyle("0F172A") },
-    { v: "", s: hStyle("0F172A") }, { v: "", s: hStyle("0F172A") },
-    { v: parseFloat(totalUSD.toFixed(2)),  s: { ...hStyle("15803D"), numFmt: '"$"#,##0.00' } },
-    { v: "", s: hStyle("7C3AED") },
-    { v: parseFloat(totalPeso.toFixed(3)), s: { ...hStyle("7C3AED"), numFmt: '#,##0.000 "kg"' } },
-    { v: "", s: hStyle("0F172A") },
-  ];
-
-  // Build sheet
-  const wsData = [HEADERS, ...dataRows, totalsRow];
+  const wsData = [HEADERS, ...dataRows];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws["!cols"] = [
-    {wch:34},{wch:36},{wch:14},{wch:10},{wch:12},{wch:30},
-    {wch:12},{wch:16},{wch:16},{wch:16},{wch:14},{wch:14},{wch:14},
-  ];
-  ws["!rows"] = [{ hpt: 32 }];
+  ws["!cols"] = [{wch:38},{wch:14},{wch:14},{wch:14},{wch:10},{wch:18}];
   XLSX.utils.book_append_sheet(wb, ws, "Cruce Factura");
   XLSX.writeFile(wb, "cruce_factura.xlsx");
 }
@@ -538,7 +457,7 @@ ${pdfText}`;
                 <StatCard icon="❌" label="No encontrado" value={notfound} color="#b91c1c" bg="#fee2e2" border="#fca5a5" />
               </div>
               <button
-                onClick={() => exportXLSX(results.rows, results.tasa)}
+                onClick={() => exportXLSX(results.rows)}
                 style={{ padding: "11px 22px", background: "linear-gradient(135deg,#16a34a,#15803d)", color: "#fff", border: "none", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(22,163,74,0.4)", whiteSpace: "nowrap" }}
               >
                 ⬇️ Descargar Excel
@@ -571,15 +490,15 @@ ${pdfText}`;
                       </td>
                       <td style={{ padding: "9px 12px", color: "#38bdf8", fontWeight: 700, whiteSpace: "nowrap", fontSize: 11 }}>{r.unidad_manejo || "—"}</td>
                       <td style={{ padding: "9px 12px", color: "#7dd3fc", whiteSpace: "nowrap", fontSize: 11 }}>{r.unidad_subpartida || "—"}</td>
-                      <td style={{ padding: "9px 12px", textAlign: "right", color: "#86efac", fontSize: 11 }}>{r.valor_cop?.toLocaleString("es-CO") || "—"}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", color: "#86efac", fontSize: 11 }}>{r.valor_cop != null ? fmtNum(r.valor_cop) : "—"}</td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 800, color: "#4ade80", fontSize: 12 }}>
-                        {r.valor_usd != null ? `$${r.valor_usd.toFixed(6)}` : "—"}
+                        {r.valor_usd != null ? fmtNum(r.valor_usd) : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", color: "#c4b5fd", fontSize: 11 }}>
-                        {r.peso_kg != null ? <span style={{ background: "rgba(139,92,246,0.15)", padding: "2px 7px", borderRadius: 8 }}>{r.peso_kg} kg</span> : "—"}
+                        {r.peso_kg != null ? <span style={{ background: "rgba(139,92,246,0.15)", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_kg)} kg</span> : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: 12 }}>
-                        {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{r.peso_total} kg</span> : "—"}
+                        {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_total)} kg</span> : "—"}
                       </td>
                       <td style={{ padding: "9px 12px" }}><StatusBadge status={r.status} /></td>
                     </tr>
