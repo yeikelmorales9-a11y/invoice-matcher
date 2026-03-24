@@ -17,7 +17,9 @@ function fileToBase64(file) {
 }
 
 async function pdfToText(base64) {
-  const pdfData = atob(base64);
+  const binary = atob(base64);
+  const pdfData = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) pdfData[i] = binary.charCodeAt(i);
   const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
   let text = "";
   for (let i = 1; i <= pdf.numPages; i++) {
