@@ -169,6 +169,12 @@ function fmtNum(val, dec = 6) {
 }
 
 // ── Export Excel ──────────────────────────────────────────────────────────────
+function toNum(val) {
+  if (val == null || val === "") return "";
+  const n = Number(val);
+  return isNaN(n) ? "" : n;
+}
+
 function exportXLSX(rows) {
   const HEADERS = ["Nombre", "Codigo", "Peso Bruto", "Peso Neto", "Cantidad", "Valor Unitario"];
 
@@ -177,10 +183,10 @@ function exportXLSX(rows) {
     return [
       r.nombre_sistema || r.desc_factura || "",
       r.codigo || "",
-      fmtNum(r.peso_total),
-      fmtNum(r.peso_total),
-      cant != null ? String(cant).replace(".", ",") : "",
-      fmtNum(r.valor_usd),
+      toNum(r.peso_total),
+      toNum(r.peso_total),
+      toNum(cant),
+      toNum(r.valor_usd),
     ];
   });
 
