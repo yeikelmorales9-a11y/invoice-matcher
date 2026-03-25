@@ -7,27 +7,20 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLi
 const API_URL = "/api/openai";
 
 // ── PDF ───────────────────────────────────────────────────────────────────────
-function fileToBase64(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result.split(",")[1]);
-    r.onerror = () => rej(new Error("Error leyendo archivo"));
-    r.readAsDataURL(file);
-  });
-}
-
-async function pdfToText(base64) {
-  const binary = atob(base64);
-  const pdfData = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) pdfData[i] = binary.charCodeAt(i);
-  const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+async function pdfToText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   let text = "";
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map(item => item.str).join(" ") + "\n";
+    for (const item of content.items) {
+      if (!item.str) continue;
+      text += item.str + (item.hasEOL ? "\n" : " ");
+    }
+    text += "\n";
   }
-  return text;
+  return text.trim();
 }
 
 // ── Inventario Excel ──────────────────────────────────────────────────────────
@@ -90,9 +83,14 @@ function buildIDF(invItems) {
 
 function extractMeasures(str) {
   const upper = str.toUpperCase(), found = new Set();
-  for (const m of upper.matchAll(/\b(\d)\s+(\d\/\d)\b/g)) found.add(m[1] + " " + m[2]);
-  for (const m of upper.matchAll(/\b(\d\/\d)\b/g)) found.add(m[1]);
-  for (const m of upper.matchAll(/\b(\d+)\b/g)) if (parseInt(m[1]) <= 12) found.add(m[1]);
+  // fracciones tipo "1 1/2"
+  for (const m of upper.matchAll(/\b(\d+)\s+(\d+\/\d+)\b/g)) found.add(m[1] + " " + m[2]);
+  // fracciones solas tipo "3/4"
+  for (const m of upper.matchAll(/\b(\d+\/\d+)\b/g)) found.add(m[1]);
+  // dimensiones decimales tipo "0.55" "1.22"
+  for (const m of upper.matchAll(/\b(\d+[.,]\d+)\b/g)) found.add(m[1].replace(",", "."));
+  // numeros enteros pequeños (tamaños tipicos hasta 24)
+  for (const m of upper.matchAll(/\b(\d+)\b/g)) if (parseInt(m[1]) <= 24) found.add(m[1]);
   return found;
 }
 
@@ -272,8 +270,7 @@ export default function App() {
       const idf = buildIDF(inventory);
 
       setProgress("Extrayendo items de la factura...");
-      const pdfB64  = await fileToBase64(pdfFile);
-      const pdfText = await pdfToText(pdfB64);
+      const pdfText = await pdfToText(pdfFile);
 
       const extractPrompt = `Analiza este texto de factura y extrae TODOS los items.
 INSTRUCCIONES:
@@ -288,7 +285,7 @@ ${pdfText}`;
 
       const extractResp = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "gpt-4o", max_tokens: 4000, temperature: 0, messages: [{ role: "user", content: extractPrompt }] }),
+        body: JSON.stringify({ model: "gpt-4o", max_tokens: 8192, temperature: 0, messages: [{ role: "user", content: extractPrompt }] }),
       });
       const extractData = await extractResp.json();
       if (!extractResp.ok) throw new Error(`API ${extractResp.status} - ${extractData.error?.message || JSON.stringify(extractData)}`);
