@@ -23,6 +23,22 @@ async function pdfToText(file) {
   return text.trim();
 }
 
+async function pdfPagesToImages(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const images = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    images.push(canvas.toDataURL("image/jpeg", 0.85).split(",")[1]);
+  }
+  return images;
+}
+
 // ── Inventario Excel ──────────────────────────────────────────────────────────
 function readInventory(file) {
   return new Promise((res, rej) => {
@@ -277,21 +293,36 @@ export default function App() {
 
       setProgress("Extrayendo items de la factura...");
       const pdfText = await pdfToText(pdfFile);
+      const isScanned = pdfText.trim().length < 50;
 
-      const extractPrompt = `Analiza este texto de factura y extrae TODOS los items.
-INSTRUCCIONES:
+      const INSTRUCCIONES = `INSTRUCCIONES:
 - cantidad: numero (puede ser decimal si es por metro/kg)
 - valor_unitario: numero en PESOS COP (si ves subtotal divide entre cantidad)
 - descripcion: nombre completo con medidas y material
 Devuelve SOLO JSON valido con dobles comillas:
-{"items":[{"descripcion":"...","cantidad":N,"valor_unitario":N}]}
+{"items":[{"descripcion":"...","cantidad":N,"valor_unitario":N}]}`;
 
-Texto:
-${pdfText}`;
+      let extractMessages;
+      if (isScanned) {
+        setProgress("PDF escaneado — analizando con vision IA...");
+        const pageImages = await pdfPagesToImages(pdfFile);
+        extractMessages = [{
+          role: "user",
+          content: [
+            { type: "text", text: `Analiza esta factura escaneada y extrae TODOS los items.\n${INSTRUCCIONES}` },
+            ...pageImages.map(b64 => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b64}` } })),
+          ],
+        }];
+      } else {
+        extractMessages = [{
+          role: "user",
+          content: `Analiza este texto de factura y extrae TODOS los items.\n${INSTRUCCIONES}\n\nTexto:\n${pdfText}`,
+        }];
+      }
 
       const extractResp = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "gpt-4o", max_tokens: 8192, temperature: 0, messages: [{ role: "user", content: extractPrompt }] }),
+        body: JSON.stringify({ model: "gpt-4o", max_tokens: 8192, temperature: 0, messages: extractMessages }),
       });
       const extractData = await extractResp.json();
       if (!extractResp.ok) throw new Error(`API ${extractResp.status} - ${extractData.error?.message || JSON.stringify(extractData)}`);
