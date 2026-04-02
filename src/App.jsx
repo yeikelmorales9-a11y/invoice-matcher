@@ -82,8 +82,14 @@ function readInventory(file) {
 }
 
 // ── TF-IDF ────────────────────────────────────────────────────────────────────
+function normalize(str) {
+  return str.toUpperCase()
+    .replace(/(\d+)\s*[Xx]\s*(\d+)/g, "$1 X $2")  // "3X14" / "3x14" / "3 x 14" → "3 X 14"
+    .replace(/[.,\-()_[\]"'/]/g, " ");
+}
+
 function tokenize(str) {
-  return str.toUpperCase().replace(/[.,\-()_[\]"']/g, " ").split(/\s+/).filter(w => w.length > 0);
+  return normalize(str).split(/\s+/).filter(w => w.length > 0);
 }
 
 function buildIDF(invItems) {
@@ -98,7 +104,7 @@ function buildIDF(invItems) {
 }
 
 function extractMeasures(str) {
-  const upper = str.toUpperCase(), found = new Set();
+  const upper = normalize(str), found = new Set();
   // fracciones tipo "1 1/2"
   for (const m of upper.matchAll(/\b(\d+)\s+(\d+\/\d+)\b/g)) found.add(m[1] + " " + m[2]);
   // fracciones solas tipo "3/4"
@@ -110,7 +116,7 @@ function extractMeasures(str) {
   return found;
 }
 
-function getTopCandidates(invItems, query, idf, N = 5) {
+function getTopCandidates(invItems, query, idf, N = 8) {
   const queryTokens = tokenize(query), queryMeasures = extractMeasures(query);
   const scored = invItems.map(item => {
     const itemTokens = tokenize(item.nombre);
