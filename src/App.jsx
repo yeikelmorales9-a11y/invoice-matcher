@@ -542,7 +542,7 @@ Devuelve SOLO JSON valido con dobles comillas:
                       <td style={{ padding: "9px 12px", color: "#7dd3fc", whiteSpace: "nowrap", fontSize: 11 }}>{r.unidad_subpartida || "—"}</td>
                       <td style={{ padding: "9px 12px", textAlign: "right", color: "#86efac", fontSize: 11 }}>{r.valor_cop != null ? fmtNum(r.valor_cop, 0) : "—"}</td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 800, color: "#4ade80", fontSize: 12 }}>
-                        {r.valor_usd != null ? fmtNum(r.valor_usd) : "—"}
+                        {r.valor_usd != null ? Number(r.valor_usd).toFixed(6) : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", color: "#c4b5fd", fontSize: 11 }}>
                         {r.peso_kg != null ? <span style={{ background: "rgba(139,92,246,0.15)", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_kg, 3)} kg</span> : "—"}
