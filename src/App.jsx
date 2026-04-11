@@ -116,7 +116,7 @@ function extractMeasures(str) {
   return found;
 }
 
-function getTopCandidates(invItems, query, idf, N = 8) {
+function getTopCandidates(invItems, query, idf, N = 10) {
   const queryTokens = tokenize(query), queryMeasures = extractMeasures(query);
   const scored = invItems.map(item => {
     const itemTokens = tokenize(item.nombre);
@@ -126,8 +126,12 @@ function getTopCandidates(invItems, query, idf, N = 8) {
     for (const t of itemTokens)  if (querySet.has(t)) score += (idf[t] || 1) * 0.5;
     const itemMeasures = extractMeasures(item.nombre);
     if (queryMeasures.size > 0 && itemMeasures.size > 0) {
-      const hasCommon = [...queryMeasures].some(m => itemMeasures.has(m));
-      if (!hasCommon) score *= 0.05;
+      const matchingMeasures = [...queryMeasures].filter(m => itemMeasures.has(m)).length;
+      if (matchingMeasures === 0) {
+        score *= 0.05; // penalizar fuerte si no coinciden medidas
+      } else {
+        score *= (1 + 0.3 * matchingMeasures); // bonus por cada medida que coincide
+      }
     }
     return { item, score };
   });
@@ -139,49 +143,72 @@ async function aiPickBestMatch(descripcionFactura, cantidadFactura, candidates) 
   if (!candidates.length) return null;
   const candidateList = candidates.map((c, i) =>
     `${i + 1}. [${c.codigo}] ${c.nombre}` +
-    (c.unidad_manejo     ? ` | UM Apollo: ${c.unidad_manejo}`        : "") +
-    (c.unidad_subpartida ? ` | U.Sub: ${c.unidad_subpartida}` : "")
+    (c.unidad_manejo     ? ` | UM: ${c.unidad_manejo}`     : "") +
+    (c.unidad_subpartida ? ` | USub: ${c.unidad_subpartida}` : "")
   ).join("\n");
 
-  const prompt = `Eres un experto en materiales de construccion y plomeria en Colombia.
+  const prompt = `Eres un experto en materiales de construccion, ferreteria y plomeria en Colombia.
 
 Item de factura:
 - Descripcion: "${descripcionFactura}"
-- Cantidad en factura: ${cantidadFactura}
+- Cantidad: ${cantidadFactura}
 
 Candidatos del inventario:
 ${candidateList}
 
 INSTRUCCIONES:
-1. Elige el candidato correcto segun tipo, medidas exactas, material y marca.
-2. Usa la Unidad de Manejo (UM Apollo) y Unidad de Subpartida para validar o ajustar la cantidad.
-   Ejemplo: si UM es "CAJA x12" y la factura dice 24 unidades => cantidad_ajustada = 2.
-   Si UM es "UND" o "UNIDAD" la cantidad no cambia.
-3. Estima el peso unitario en KG del producto seleccionado.
-4. Si ningun candidato corresponde al producto, responde match: 0.
+1. Elige el candidato que MAS SE ACERQUE al item de factura (tipo, medidas, material).
+   - "high": mismo producto y medidas exactas.
+   - "medium": mismo tipo, alguna diferencia menor (marca, presentacion).
+   - "low": similar pero diferencias notables.
+2. Prefiere confidence "low" antes que match:0. Solo responde match:0 si el item de
+   factura no tiene NINGUNA relacion con los candidatos (ej: servicio vs material fisico).
+3. Ajusta cantidad segun Unidad de Manejo si aplica (CAJA x12 + 24und = 2 cajas).
+4. SIEMPRE estima peso_kg unitario del item de FACTURA con tu conocimiento tecnico,
+   incluso cuando match sea 0. Se muy preciso: considera tipo, material y medida.
+   Referencias: tornillo 1/2" ~0.003kg | tubo PVC 1/2" 6m ~0.8kg | cable 14AWG/m ~0.05kg
+   | codo PVC 1/2" ~0.02kg | valvula 1/2" ~0.15kg | ladrillo ~2.5kg | bolsa cemento ~50kg.
 
 Responde SOLO con este JSON sin markdown:
-{"match":N,"confidence":"high"|"medium"|"low","cantidad_ajustada":N_O_NULL,"nota_cantidad":"texto_o_null","peso_kg":N_O_NULL}`;
+{"match":N,"confidence":"high"|"medium"|"low","cantidad_ajustada":N_O_NULL,"nota_cantidad":"texto_o_null","peso_kg":N}`;
 
   const resp = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "gpt-4o", max_tokens: 150, temperature: 0, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: "gpt-4o", max_tokens: 200, temperature: 0, messages: [{ role: "user", content: prompt }] }),
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data.error?.message || "Error en API de matching");
   const raw = data.choices[0].message.content.trim().replace(/```json|```/g, "");
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed.match || parsed.match === 0 || !candidates[parsed.match - 1]) return null;
+    const pesoKg = (parsed.peso_kg != null && parsed.peso_kg > 0) ? parsed.peso_kg : null;
+    const hasMatch = parsed.match && parsed.match !== 0 && candidates[parsed.match - 1];
+    if (!hasMatch) return pesoKg ? { _soloPeso: true, peso_kg: pesoKg } : null;
     return {
       ...candidates[parsed.match - 1],
       confidence:        parsed.confidence,
       cantidad_ajustada: parsed.cantidad_ajustada ?? null,
       nota_cantidad:     parsed.nota_cantidad ?? null,
-      peso_kg:           parsed.peso_kg ?? null,
+      peso_kg:           pesoKg,
     };
   } catch { return null; }
+}
+
+// ── Estimacion de peso para items sin candidatos ───────────────────────────────
+async function estimatePeso(descripcion) {
+  const resp = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o", max_tokens: 60, temperature: 0,
+      messages: [{ role: "user", content: `Estima el peso unitario en KG de este producto de construccion/ferreteria/plomeria: "${descripcion}". Se muy preciso considerando tipo, material y medida. Responde SOLO JSON: {"peso_kg":N}` }],
+    }),
+  });
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  const raw = data.choices?.[0]?.message?.content?.trim().replace(/```json|```/g, "") || "";
+  try { const p = JSON.parse(raw); return (p.peso_kg > 0) ? p.peso_kg : null; } catch { return null; }
 }
 
 // ── Helpers de formato ────────────────────────────────────────────────────────
@@ -346,28 +373,36 @@ Devuelve SOLO JSON valido con dobles comillas:
         setProgress(`Cruzando item ${idx + 1} de ${invoiceItems.length}`);
 
         const vr_usd = inv.valor_unitario ? +(inv.valor_unitario / tasaNum).toFixed(6) : null;
-        const candidates = getTopCandidates(inventory, inv.descripcion, idf, 5);
+        const candidates = getTopCandidates(inventory, inv.descripcion, idf, 10);
 
         let match = null, status = "notfound";
         if (candidates.length > 0) {
           match = await aiPickBestMatch(inv.descripcion, inv.cantidad, candidates);
-          if (match) status = match.confidence === "high" ? "found" : "verify";
+          if (match && !match._soloPeso) {
+            status = match.confidence === "high" ? "found" : "verify";
+          }
         }
 
-        const cantFinal = match?.cantidad_ajustada ?? inv.cantidad;
+        // If GPT gave no match (or only returned peso), try estimating peso standalone
+        let pesoKgFinal = match?.peso_kg ?? null;
+        if (!pesoKgFinal && candidates.length === 0) {
+          pesoKgFinal = await estimatePeso(inv.descripcion);
+        }
+
+        const cantFinal = match?._soloPeso ? inv.cantidad : (match?.cantidad_ajustada ?? inv.cantidad);
         rows.push({
           desc_factura:      inv.descripcion,
           cantidad:          inv.cantidad,
-          cantidad_ajustada: match?.cantidad_ajustada ?? null,
-          nota_cantidad:     match?.nota_cantidad ?? null,
+          cantidad_ajustada: (!match || match._soloPeso) ? null : (match.cantidad_ajustada ?? null),
+          nota_cantidad:     (!match || match._soloPeso) ? null : (match.nota_cantidad ?? null),
           valor_cop:         inv.valor_unitario,
           valor_usd:         vr_usd,
-          nombre_sistema:    match?.nombre ?? null,
-          codigo:            match?.codigo ?? null,
-          unidad_manejo:     match?.unidad_manejo ?? null,
-          unidad_subpartida: match?.unidad_subpartida ?? null,
-          peso_kg:           match?.peso_kg ?? null,
-          peso_total:        match?.peso_kg ? +(match.peso_kg * cantFinal).toFixed(3) : null,
+          nombre_sistema:    (!match || match._soloPeso) ? null : (match.nombre ?? null),
+          codigo:            (!match || match._soloPeso) ? null : (match.codigo ?? null),
+          unidad_manejo:     (!match || match._soloPeso) ? null : (match.unidad_manejo ?? null),
+          unidad_subpartida: (!match || match._soloPeso) ? null : (match.unidad_subpartida ?? null),
+          peso_kg:           pesoKgFinal,
+          peso_total:        pesoKgFinal ? +(pesoKgFinal * cantFinal).toFixed(3) : null,
           status,
         });
       }
