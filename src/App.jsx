@@ -380,9 +380,10 @@ Devuelve SOLO JSON valido con dobles comillas:
     setLoading(false);
   }, [pdfFile, xlsxFile, tasa]);
 
-  const found    = results?.rows.filter(r => r.status === "found").length    || 0;
-  const verify   = results?.rows.filter(r => r.status === "verify").length   || 0;
-  const notfound = results?.rows.filter(r => r.status === "notfound").length || 0;
+  const found      = results?.rows.filter(r => r.status === "found").length    || 0;
+  const verify     = results?.rows.filter(r => r.status === "verify").length   || 0;
+  const notfound   = results?.rows.filter(r => r.status === "notfound").length || 0;
+  const totalPeso  = results?.rows.reduce((s, r) => s + (r.peso_total || 0), 0) || 0;
   const progPct  = progTotal > 0 ? Math.round((progIdx / progTotal) * 100) : 0;
 
   const COLS = ["#","Desc. Factura","Nombre en Sistema","Codigo","Cant.","Cant. Aj.","UM Apollo","U.Sub.","COP","USD","Peso Unit.","Peso Total","Estado"];
@@ -504,6 +505,13 @@ Devuelve SOLO JSON valido con dobles comillas:
               >
                 ⬇️ Descargar Excel
               </button>
+            </div>
+
+            <div style={{ background: "rgba(99,102,241,0.12)", border: "1.5px solid rgba(99,102,241,0.3)", borderRadius: 14, padding: "14px 24px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#a5b4fc" }}>⚖️ Peso Total de Factura</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: "#c7d2fe", letterSpacing: "-0.5px" }}>
+                {fmtNum(totalPeso, 3)} <span style={{ fontSize: 13, fontWeight: 500, color: "#818cf8" }}>kg</span>
+              </span>
             </div>
 
             <div style={{ overflowX: "auto", borderRadius: 16, border: "1px solid rgba(255,255,255,0.1)" }}>
