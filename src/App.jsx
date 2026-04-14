@@ -143,28 +143,59 @@ function readFactores(file) {
 }
 
 // ── TF-IDF ────────────────────────────────────────────────────────────────────
-// Sinónimos para materiales de construcción/ferretería colombianos
+// Sinónimos: palabras distintas que refieren al mismo producto en ferretería colombiana.
+// El género (CORRUGADO/CORRUGADA, GALVANIZADO/GALVANIZADA…) se maneja por stemming en tokenize.
 const SYNONYMS = new Map([
-  ["VARILLA",     ["HIERRO", "BARRA"]],
-  ["HIERRO",      ["VARILLA", "BARRA"]],
-  ["BARRA",       ["VARILLA", "HIERRO"]],
-  ["CORRUGADA",   ["CORRUGADO"]],
-  ["CORRUGADO",   ["CORRUGADA"]],
-  ["PERNO",       ["TORNILLO"]],
-  ["TORNILLO",    ["PERNO"]],
-  ["TUBO",        ["TUBERIA"]],
-  ["TUBERIA",     ["TUBO"]],
-  ["LAMINA",      ["CHAPA", "PLANCHA"]],
-  ["CHAPA",       ["LAMINA", "PLANCHA"]],
-  ["PLANCHA",     ["LAMINA", "CHAPA"]],
-  ["ROLLO",       ["BOBINA"]],
-  ["BOBINA",      ["ROLLO"]],
-  ["LLAVE",       ["GRIFO"]],
-  ["GRIFO",       ["LLAVE"]],
-  ["ANGULAR",     ["ANGULO"]],
-  ["ANGULO",      ["ANGULAR"]],
-  ["CANAL",       ["CANALETA"]],
-  ["CANALETA",    ["CANAL"]],
+  // Acero / hierro
+  ["VARILLA",       ["HIERRO", "BARRA"]],
+  ["HIERRO",        ["VARILLA", "BARRA"]],
+  ["BARRA",         ["VARILLA", "HIERRO"]],
+  ["PLATINA",       ["PLETINA", "PATIN"]],
+  ["PLETINA",       ["PLATINA", "PATIN"]],
+  ["PATIN",         ["PLATINA", "PLETINA"]],
+  ["ANGULAR",       ["ANGULO", "PERFIL L"]],
+  ["ANGULO",        ["ANGULAR"]],
+  // Tubería / plomería
+  ["TUBO",          ["TUBERIA"]],
+  ["TUBERIA",       ["TUBO"]],
+  ["UNION",         ["ACOPLE", "CUPLA", "CONECTOR"]],
+  ["ACOPLE",        ["UNION", "CUPLA", "CONECTOR"]],
+  ["CUPLA",         ["UNION", "ACOPLE"]],
+  ["REDUCCION",     ["BUJE", "BUSHING", "REDUCCIÓN"]],
+  ["REDUCCIÓN",     ["BUJE", "BUSHING", "REDUCCION"]],
+  ["BUJE",          ["REDUCCION", "BUSHING", "REDUCCIÓN"]],
+  ["BUSHING",       ["BUJE", "REDUCCION"]],
+  ["TAPON",         ["TAPA", "TAPÓN", "CAP"]],
+  ["TAPÓN",         ["TAPON", "TAPA", "CAP"]],
+  ["TAPA",          ["TAPON", "TAPÓN"]],
+  ["LLAVE",         ["GRIFO", "VALVULA", "VÁLVULA"]],
+  ["GRIFO",         ["LLAVE"]],
+  ["VALVULA",       ["LLAVE", "VÁLVULA"]],
+  ["VÁLVULA",       ["LLAVE", "VALVULA"]],
+  // Láminas / perfiles
+  ["LAMINA",        ["CHAPA", "PLANCHA"]],
+  ["CHAPA",         ["LAMINA", "PLANCHA"]],
+  ["PLANCHA",       ["LAMINA", "CHAPA"]],
+  ["CANAL",         ["CANALETA", "CANAL C", "PERFIL C", "PERFIL U"]],
+  ["CANALETA",      ["CANAL"]],
+  // Fijaciones
+  ["PERNO",         ["TORNILLO"]],
+  ["TORNILLO",      ["PERNO"]],
+  ["ARANDELA",      ["RODELA", "WASHER"]],
+  ["RODELA",        ["ARANDELA", "WASHER"]],
+  // Eléctrico
+  ["CABLE",         ["ALAMBRE", "CONDUCTOR"]],
+  ["ALAMBRE",       ["CABLE", "CONDUCTOR"]],
+  ["CONDUCTOR",     ["CABLE", "ALAMBRE"]],
+  ["INTERRUPTOR",   ["SWITCH", "BREAKER"]],
+  ["SWITCH",        ["INTERRUPTOR", "BREAKER"]],
+  ["BREAKER",       ["INTERRUPTOR", "SWITCH"]],
+  // Enrollados
+  ["ROLLO",         ["BOBINA"]],
+  ["BOBINA",        ["ROLLO"]],
+  // Cemento / concreto
+  ["CEMENTO",       ["CONCRETO"]],
+  ["CONCRETO",      ["CEMENTO"]],
 ]);
 
 function expandWithSynonyms(tokens) {
@@ -182,8 +213,20 @@ function normalize(str) {
     .replace(/[.,\-()_[\]"'/]/g, " ");
 }
 
+function stemSpanish(word) {
+  // Normaliza género de adjetivos: CORRUGADO/CORRUGADA → CORRUGAD
+  //   -ADO/-ADA  (participios: galvanizado, corrugado, perforado…)
+  //   -IDO/-IDA  (pulido, fundido…)
+  //   -OSO/-OSA  (rugoso…)
+  //   -IZO/-IZA  (plomizo…)
+  if (word.length >= 7) {
+    if (/ADO$|ADA$|IDO$|IDA$|OSO$|OSA$|IZO$|IZA$/.test(word)) return word.slice(0, -1);
+  }
+  return word;
+}
+
 function tokenize(str) {
-  return normalize(str).split(/\s+/).filter(w => w.length > 0);
+  return normalize(str).split(/\s+/).filter(w => w.length > 0).map(stemSpanish);
 }
 
 function buildIDF(invItems) {
