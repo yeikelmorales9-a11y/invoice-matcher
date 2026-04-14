@@ -81,6 +81,53 @@ function readInventory(file) {
   });
 }
 
+// ── Factores de Conversión (pesos exactos del inventario) ─────────────────────
+const LS_FACTORES_KEY = "invoice_factores_v1";
+
+function loadFactoresFromLS() {
+  try { const raw = localStorage.getItem(LS_FACTORES_KEY); return raw ? JSON.parse(raw) : null; }
+  catch { return null; }
+}
+
+function saveFactoresToLS(factores) {
+  try { localStorage.setItem(LS_FACTORES_KEY, JSON.stringify(factores)); } catch {}
+}
+
+function readFactores(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(raw.length, 10); i++) {
+          if (
+            raw[i].some(c => /c[oó]digo/i.test(String(c))) &&
+            raw[i].some(c => /numerador/i.test(String(c)))
+          ) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) { rej(new Error("No se encontró encabezado con 'codigo' y 'numerador'")); return; }
+        const headers = raw[headerIdx].map(h => String(h).trim().toLowerCase());
+        const codigoIdx = headers.findIndex(h => /c[oó]digo/.test(h));
+        const numIdx    = headers.findIndex(h => h.includes("numerador"));
+        const denIdx    = headers.findIndex(h => h.includes("denominador"));
+        const factores = {};
+        for (let i = headerIdx + 1; i < raw.length; i++) {
+          const codigo = String(raw[i][codigoIdx] || "").trim();
+          const num    = parseFloat(String(raw[i][numIdx]    || "0").replace(",", ".")) || 0;
+          const den    = denIdx >= 0 ? (parseFloat(String(raw[i][denIdx] || "1").replace(",", ".")) || 1) : 1;
+          if (codigo && num > 0) factores[codigo] = +(num / den).toFixed(6);
+        }
+        res(factores);
+      } catch (err) { rej(err); }
+    };
+    r.onerror = () => rej(new Error("Error leyendo factores de conversión"));
+    r.readAsArrayBuffer(file);
+  });
+}
+
 // ── TF-IDF ────────────────────────────────────────────────────────────────────
 function normalize(str) {
   return str.toUpperCase()
@@ -305,6 +352,7 @@ function StatCard({ icon, label, value, color, bg, border }) {
 export default function App() {
   const [pdfFile,   setPdfFile]   = useState(null);
   const [xlsxFile,  setXlsxFile]  = useState(null);
+  const [factores,  setFactores]  = useState(() => loadFactoresFromLS());
   const [tasa,      setTasa]      = useState("");
   const [loading,   setLoading]   = useState(false);
   const [progress,  setProgress]  = useState("");
@@ -383,10 +431,18 @@ Devuelve SOLO JSON valido con dobles comillas:
           }
         }
 
-        // If GPT gave no match (or only returned peso), try estimating peso standalone
-        let pesoKgFinal = match?.peso_kg ?? null;
-        if (!pesoKgFinal && candidates.length === 0) {
-          pesoKgFinal = await estimatePeso(inv.descripcion);
+        // Peso: tabla de conversión (exacto) → GPT estimate → estimatePeso fallback
+        let pesoKgFinal = null;
+        let pesoExacto  = false;
+        const codigoMatch = (!match || match._soloPeso) ? null : match.codigo;
+        if (codigoMatch && factores?.[codigoMatch]) {
+          pesoKgFinal = factores[codigoMatch];
+          pesoExacto  = true;
+        } else {
+          pesoKgFinal = match?.peso_kg ?? null;
+          if (!pesoKgFinal && candidates.length === 0) {
+            pesoKgFinal = await estimatePeso(inv.descripcion);
+          }
         }
 
         const cantFinal = match?._soloPeso ? inv.cantidad : (match?.cantidad_ajustada ?? inv.cantidad);
@@ -402,6 +458,7 @@ Devuelve SOLO JSON valido con dobles comillas:
           unidad_manejo:     (!match || match._soloPeso) ? null : (match.unidad_manejo ?? null),
           unidad_subpartida: (!match || match._soloPeso) ? null : (match.unidad_subpartida ?? null),
           peso_kg:           pesoKgFinal,
+          peso_exacto:       pesoExacto,
           peso_total:        pesoKgFinal ? +(pesoKgFinal * cantFinal).toFixed(3) : null,
           status,
         });
@@ -413,7 +470,7 @@ Devuelve SOLO JSON valido con dobles comillas:
       setError(e.message || "Error desconocido");
     }
     setLoading(false);
-  }, [pdfFile, xlsxFile, tasa]);
+  }, [pdfFile, xlsxFile, tasa, factores]);
 
   const found      = results?.rows.filter(r => r.status === "found").length    || 0;
   const verify     = results?.rows.filter(r => r.status === "verify").length   || 0;
@@ -462,6 +519,44 @@ Devuelve SOLO JSON valido con dobles comillas:
             <DropZone label="Arrastra o clic — Inventario Excel (.xlsx)" accept=".xlsx,.xls" icon="📊" file={xlsxFile} onFile={setXlsxFile} />
           </div>
 
+          {/* ── Factores de Conversión ── */}
+          <div style={{ marginBottom: 20 }}>
+            {factores ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(34,197,94,0.1)", border: "1.5px solid rgba(34,197,94,0.3)", borderRadius: 12, padding: "11px 16px", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 20 }}>⚖️</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#4ade80" }}>Factores de conversión cargados</div>
+                    <div style={{ fontSize: 11, color: "rgba(74,222,128,0.65)" }}>{Object.keys(factores).length} códigos · pesos exactos del inventario · guardado localmente</div>
+                  </div>
+                </div>
+                <label style={{ cursor: "pointer", fontSize: 12, color: "#86efac", background: "rgba(34,197,94,0.2)", border: "1px solid rgba(34,197,94,0.4)", padding: "7px 16px", borderRadius: 9, fontWeight: 700, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  🔄 Actualizar tabla
+                  <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={async (e) => {
+                    const f = e.target.files[0]; if (!f) return;
+                    try { const data = await readFactores(f); setFactores(data); saveFactoresToLS(data); }
+                    catch (err) { setError(err.message); }
+                    e.target.value = "";
+                  }} />
+                </label>
+              </div>
+            ) : (
+              <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", background: "rgba(255,255,255,0.04)", border: "2px dashed rgba(255,255,255,0.13)", borderRadius: 12, padding: "14px 18px", transition: "border-color 0.2s" }}>
+                <span style={{ fontSize: 24 }}>⚖️</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.55)" }}>Cargar factores de conversión <span style={{ color: "rgba(148,163,184,0.5)", fontWeight: 400 }}>(opcional pero recomendado)</span></div>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.45)", marginTop: 2 }}>Excel con código, numerador, denominador · pesos exactos del inventario · se guarda, no necesitas subirlo cada vez</div>
+                </div>
+                <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={async (e) => {
+                  const f = e.target.files[0]; if (!f) return;
+                  try { const data = await readFactores(f); setFactores(data); saveFactoresToLS(data); }
+                  catch (err) { setError(err.message); }
+                  e.target.value = "";
+                }} />
+              </label>
+            )}
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
             <label style={{ fontSize: 13, fontWeight: 700, color: "#cbd5e1", whiteSpace: "nowrap" }}>💱 Tasa COP → USD</label>
             <input
@@ -478,8 +573,7 @@ Devuelve SOLO JSON valido con dobles comillas:
           <div style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 12, padding: "11px 16px", marginBottom: 22, fontSize: 12, color: "#a5b4fc", display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 18 }}>🧠</span>
             <span>
-              <strong style={{ color: "#c7d2fe" }}>Motor IA:</strong> TF-IDF filtra top 5 candidatos del inventario · GPT-4o elige el match correcto,
-              valida cantidades con <strong style={{ color: "#c7d2fe" }}>Unidad de Manejo</strong> y estima <strong style={{ color: "#c7d2fe" }}>pesos unitarios</strong>
+              <strong style={{ color: "#c7d2fe" }}>Motor IA:</strong> TF-IDF filtra top 10 candidatos · GPT-4o elige el match, valida cantidades con <strong style={{ color: "#c7d2fe" }}>Unidad de Manejo</strong> · pesos exactos desde <strong style={{ color: "#c7d2fe" }}>tabla de conversión</strong> o estimados por IA
             </span>
           </div>
 
@@ -580,7 +674,11 @@ Devuelve SOLO JSON valido con dobles comillas:
                         {r.valor_usd != null ? Number(r.valor_usd).toFixed(6) : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", color: "#c4b5fd", fontSize: 11 }}>
-                        {r.peso_kg != null ? <span style={{ background: "rgba(139,92,246,0.15)", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_kg, 3)} kg</span> : "—"}
+                        {r.peso_kg != null
+                          ? <span style={{ background: r.peso_exacto ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)", color: r.peso_exacto ? "#4ade80" : "#c4b5fd", padding: "2px 7px", borderRadius: 8 }} title={r.peso_exacto ? "Peso exacto de tabla de conversión" : "Peso estimado por IA"}>
+                              {r.peso_exacto ? "⚖" : "~"}{fmtNum(r.peso_kg, 3)} kg
+                            </span>
+                          : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: 12 }}>
                         {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_total, 3)} kg</span> : "—"}
