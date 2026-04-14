@@ -259,12 +259,26 @@ function getTopCandidates(invItems, query, idf, N = 10) {
   const queryMeasures  = extractMeasures(query);
   const queryExpandSet = new Set(queryExpanded);
 
+  const queryDirectSet = new Set(queryTokens); // tokens originales, sin sinónimos
+
   const scored = invItems.map(item => {
     const itemTokens = tokenize(item.nombre);
     const itemSet    = new Set(itemTokens);
     let score = 0;
-    for (const t of queryExpanded) if (itemSet.has(t)) score += (idf[t] || 1);
-    for (const t of itemTokens)    if (queryExpandSet.has(t)) score += (idf[t] || 1) * 0.5;
+    for (const t of queryExpanded) {
+      if (itemSet.has(t)) {
+        // Token directo del query → puntuación completa
+        // Token incorporado solo por sinónimo → 60% (prefiere coincidencia directa)
+        const weight = queryDirectSet.has(t) ? 1.0 : 0.6;
+        score += (idf[t] || 1) * weight;
+      }
+    }
+    for (const t of itemTokens) {
+      if (queryExpandSet.has(t)) {
+        const weight = queryDirectSet.has(t) ? 0.5 : 0.3;
+        score += (idf[t] || 1) * weight;
+      }
+    }
     const itemMeasures = extractMeasures(item.nombre);
     if (queryMeasures.size > 0 && itemMeasures.size > 0) {
       const matchingMeasures = [...queryMeasures].filter(m => itemMeasures.has(m)).length;
@@ -317,11 +331,18 @@ INSTRUCCIONES:
    - "low": similar pero diferencias notables.
 2. Prefiere confidence "low" antes que match:0. Solo responde match:0 si el item de
    factura no tiene NINGUNA relacion con los candidatos (ej: servicio vs material fisico).
-3. Ajusta cantidad segun Unidad de Manejo si aplica (CAJA x12 + 24und = 2 cajas).
-4. SIEMPRE estima peso_kg unitario del item de FACTURA con tu conocimiento tecnico,
-   incluso cuando match sea 0. Se muy preciso: considera tipo, material y medida.
-   Referencias: tornillo 1/2" ~0.003kg | tubo PVC 1/2" 6m ~0.8kg | cable 14AWG/m ~0.05kg
-   | codo PVC 1/2" ~0.02kg | valvula 1/2" ~0.15kg | ladrillo ~2.5kg | bolsa cemento ~50kg.
+3. Ajusta cantidad segun Unidad de Manejo (UM):
+   - Si UM es KILOGRAMOS y la factura viene en UNIDADES: cantidad_ajustada = cantidad * peso_kg
+     y nota_cantidad debe explicar "X und x Y kg/und = Z kg".
+   - Si UM es CAJA/PAQUETE con multiplo conocido: convierte correspondientemente.
+4. SIEMPRE estima peso_kg = kg por UNA UNIDAD FISICA del item de factura.
+   Se muy preciso usando formula o referencia tecnica:
+   - Hierro/varilla corrugada: peso = d^2/162 kg/m (d en mm) * longitud_m
+     Ej: 1/2"(12.7mm) x 12m = 12.7^2/162*12 = 11.96 kg | 3/8"(9.5mm) x 6m = 3.33 kg
+   - Cable electrico: 14AWG/m ~0.05kg | 12AWG/m ~0.08kg | 10AWG/m ~0.13kg
+   - Tubo PVC 1/2" x 6m ~0.8kg | 3/4" x 6m ~1.1kg | 1" x 6m ~1.6kg
+   - Tornillo 1/2" ~0.003kg | perno 1/2"x2" ~0.05kg | arandela 1/2" ~0.003kg
+   - Codo PVC 1/2" ~0.02kg | valvula bola 1/2" ~0.15kg | bolsa cemento 50kg | ladrillo ~2.5kg
 
 Responde SOLO con este JSON sin markdown:
 {"match":N,"confidence":"high"|"medium"|"low","cantidad_ajustada":N_O_NULL,"nota_cantidad":"texto_o_null","peso_kg":N}`;
@@ -369,6 +390,14 @@ async function estimatePeso(descripcion) {
 function fmtNum(val, dec = 6) {
   if (val == null || val === "") return "";
   return Number(val).toFixed(dec).replace(".", ",");
+}
+
+// Pesos en tabla: punto decimal, sin ceros finales innecesarios (ej: 18.5, no 18,500)
+function fmtPeso(val) {
+  if (val == null || val === "") return "";
+  const n = Number(val);
+  if (isNaN(n)) return "";
+  return n.toFixed(3).replace(/\.?0+$/, "");
 }
 
 // ── Export Excel ──────────────────────────────────────────────────────────────
@@ -749,7 +778,7 @@ Devuelve SOLO JSON valido con dobles comillas:
             <div style={{ background: "rgba(99,102,241,0.12)", border: "1.5px solid rgba(99,102,241,0.3)", borderRadius: 14, padding: "14px 24px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#a5b4fc" }}>⚖️ Peso Total de Factura</span>
               <span style={{ fontSize: 22, fontWeight: 800, color: "#c7d2fe", letterSpacing: "-0.5px" }}>
-                {fmtNum(totalPeso, 3)} <span style={{ fontSize: 13, fontWeight: 500, color: "#818cf8" }}>kg</span>
+                {fmtPeso(totalPeso)} <span style={{ fontSize: 13, fontWeight: 500, color: "#818cf8" }}>kg</span>
               </span>
             </div>
 
@@ -786,12 +815,12 @@ Devuelve SOLO JSON valido con dobles comillas:
                       <td style={{ padding: "9px 12px", textAlign: "right", color: "#c4b5fd", fontSize: 11 }}>
                         {r.peso_kg != null
                           ? <span style={{ background: r.peso_exacto ? "rgba(34,197,94,0.15)" : "rgba(139,92,246,0.15)", color: r.peso_exacto ? "#4ade80" : "#c4b5fd", padding: "2px 7px", borderRadius: 8 }} title={r.peso_exacto ? "Peso exacto de tabla de conversión" : "Peso estimado por IA"}>
-                              {r.peso_exacto ? "⚖" : "~"}{fmtNum(r.peso_kg, 3)} kg
+                              {r.peso_exacto ? "⚖" : "~"}{fmtPeso(r.peso_kg)} kg
                             </span>
                           : "—"}
                       </td>
                       <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700, fontSize: 12 }}>
-                        {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{fmtNum(r.peso_total, 3)} kg</span> : "—"}
+                        {r.peso_total != null ? <span style={{ background: "rgba(99,102,241,0.2)", color: "#a5b4fc", padding: "2px 7px", borderRadius: 8 }}>{fmtPeso(r.peso_total)} kg</span> : "—"}
                       </td>
                       <td style={{ padding: "9px 12px" }}><StatusBadge status={r.status} /></td>
                     </tr>
