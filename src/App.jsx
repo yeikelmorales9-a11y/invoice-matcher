@@ -585,6 +585,20 @@ Devuelve SOLO JSON valido con dobles comillas:
         }
 
         const cantFinal = match?._soloPeso ? inv.cantidad : (match?.cantidad_ajustada ?? inv.cantidad);
+        const umEsKg    = match?.unidad_manejo?.toUpperCase() === "KILOGRAMOS";
+
+        // Peso total:
+        // - UM=KILOGRAMOS y GPT ajustó cantidad → cantidad_ajustada YA ES el total en KG (no multiplicar de nuevo)
+        // - UM=KILOGRAMOS sin ajuste → inv.cantidad ya está en KG
+        // - Cualquier otra UM → cantidad × kg_por_unidad
+        let pesoTotalFinal = null;
+        if (pesoKgFinal) {
+          if (umEsKg) {
+            pesoTotalFinal = +(cantFinal).toFixed(3); // cantidad_ajustada = total KG directo
+          } else {
+            pesoTotalFinal = +(pesoKgFinal * cantFinal).toFixed(3);
+          }
+        }
         rows.push({
           desc_factura:      inv.descripcion,
           cantidad:          inv.cantidad,
@@ -598,7 +612,7 @@ Devuelve SOLO JSON valido con dobles comillas:
           unidad_subpartida: (!match || match._soloPeso) ? null : (match.unidad_subpartida ?? null),
           peso_kg:           pesoKgFinal,
           peso_exacto:       pesoExacto,
-          peso_total:        pesoKgFinal ? +(pesoKgFinal * cantFinal).toFixed(3) : null,
+          peso_total:        pesoTotalFinal,
           status,
         });
       }
