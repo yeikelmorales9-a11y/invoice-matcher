@@ -40,6 +40,14 @@ async function pdfPagesToImages(file) {
 }
 
 // ── Inventario Excel ──────────────────────────────────────────────────────────
+function excelDateToTs(val) {
+  if (val == null || val === "") return null;
+  if (typeof val === "number" && val > 0) return (val - 25569) * 86400000; // Excel serial → Unix ms
+  if (typeof val === "string") { const d = new Date(val.replace(/\//g, "-")); return isNaN(d) ? null : d.getTime(); }
+  if (val instanceof Date) return val.getTime();
+  return null;
+}
+
 function readInventory(file) {
   return new Promise((res, rej) => {
     const r = new FileReader();
@@ -61,6 +69,7 @@ function readInventory(file) {
         const codeIdx  = headers.findIndex((h) => h.includes("codigo"));
         const umIdx    = headers.findIndex((h) => h.includes("unidad manejo") || h === "um");
         const usubIdx  = headers.findIndex((h) => h.includes("unidad subpartida") || h.includes("subpartida"));
+        const movIdx   = headers.findIndex((h) => h.includes("mov") || h.includes("movement"));
         const items = [];
         for (let i = headerIdx + 1; i < raw.length; i++) {
           const nombre = String(raw[i][nameIdx] || "").trim();
@@ -71,6 +80,7 @@ function readInventory(file) {
             codigo,
             unidad_manejo:     umIdx   >= 0 ? String(raw[i][umIdx]   || "").trim() : "",
             unidad_subpartida: usubIdx >= 0 ? String(raw[i][usubIdx] || "").trim() : "",
+            fecha_mov:         movIdx  >= 0 ? excelDateToTs(raw[i][movIdx]) : null,
           });
         }
         res(items);
@@ -82,7 +92,9 @@ function readInventory(file) {
 }
 
 // ── Factores de Conversión (pesos exactos del inventario) ─────────────────────
-const LS_FACTORES_KEY = "invoice_factores_v1";
+// Formato: { codigo: { peso: number, unidad: string } }
+// Items con unidad "KG" se omiten del lookup (se vendena por KG → peso/unidad lo estima GPT)
+const LS_FACTORES_KEY = "invoice_factores_v2";
 
 function loadFactoresFromLS() {
   try { const raw = localStorage.getItem(LS_FACTORES_KEY); return raw ? JSON.parse(raw) : null; }
@@ -110,15 +122,17 @@ function readFactores(file) {
         }
         if (headerIdx === -1) { rej(new Error("No se encontró encabezado con 'codigo' y 'numerador'")); return; }
         const headers = raw[headerIdx].map(h => String(h).trim().toLowerCase());
-        const codigoIdx = headers.findIndex(h => /c[oó]digo/.test(h));
-        const numIdx    = headers.findIndex(h => h.includes("numerador"));
-        const denIdx    = headers.findIndex(h => h.includes("denominador"));
+        const codigoIdx  = headers.findIndex(h => /c[oó]digo/.test(h));
+        const numIdx     = headers.findIndex(h => h.includes("numerador"));
+        const denIdx     = headers.findIndex(h => h.includes("denominador"));
+        const unidadIdx  = headers.findIndex(h => h.includes("unidad") && !h.includes("codigo"));
         const factores = {};
         for (let i = headerIdx + 1; i < raw.length; i++) {
           const codigo = String(raw[i][codigoIdx] || "").trim();
           const num    = parseFloat(String(raw[i][numIdx]    || "0").replace(",", ".")) || 0;
           const den    = denIdx >= 0 ? (parseFloat(String(raw[i][denIdx] || "1").replace(",", ".")) || 1) : 1;
-          if (codigo && num > 0) factores[codigo] = +(num / den).toFixed(6);
+          const unidad = unidadIdx >= 0 ? String(raw[i][unidadIdx] || "").trim().toUpperCase() : "";
+          if (codigo && num > 0) factores[codigo] = { peso: +(num / den).toFixed(6), unidad };
         }
         res(factores);
       } catch (err) { rej(err); }
@@ -129,6 +143,39 @@ function readFactores(file) {
 }
 
 // ── TF-IDF ────────────────────────────────────────────────────────────────────
+// Sinónimos para materiales de construcción/ferretería colombianos
+const SYNONYMS = new Map([
+  ["VARILLA",     ["HIERRO", "BARRA"]],
+  ["HIERRO",      ["VARILLA", "BARRA"]],
+  ["BARRA",       ["VARILLA", "HIERRO"]],
+  ["CORRUGADA",   ["CORRUGADO"]],
+  ["CORRUGADO",   ["CORRUGADA"]],
+  ["PERNO",       ["TORNILLO"]],
+  ["TORNILLO",    ["PERNO"]],
+  ["TUBO",        ["TUBERIA"]],
+  ["TUBERIA",     ["TUBO"]],
+  ["LAMINA",      ["CHAPA", "PLANCHA"]],
+  ["CHAPA",       ["LAMINA", "PLANCHA"]],
+  ["PLANCHA",     ["LAMINA", "CHAPA"]],
+  ["ROLLO",       ["BOBINA"]],
+  ["BOBINA",      ["ROLLO"]],
+  ["LLAVE",       ["GRIFO"]],
+  ["GRIFO",       ["LLAVE"]],
+  ["ANGULAR",     ["ANGULO"]],
+  ["ANGULO",      ["ANGULAR"]],
+  ["CANAL",       ["CANALETA"]],
+  ["CANALETA",    ["CANAL"]],
+]);
+
+function expandWithSynonyms(tokens) {
+  const expanded = new Set(tokens);
+  for (const t of tokens) {
+    const syns = SYNONYMS.get(t);
+    if (syns) for (const s of syns) expanded.add(s);
+  }
+  return [...expanded];
+}
+
 function normalize(str) {
   return str.toUpperCase()
     .replace(/(\d+)\s*[Xx]\s*(\d+)/g, "$1 X $2")  // "3X14" / "3x14" / "3 x 14" → "3 X 14"
@@ -164,13 +211,17 @@ function extractMeasures(str) {
 }
 
 function getTopCandidates(invItems, query, idf, N = 10) {
-  const queryTokens = tokenize(query), queryMeasures = extractMeasures(query);
+  const queryTokens    = tokenize(query);
+  const queryExpanded  = expandWithSynonyms(queryTokens); // VARILLA → también busca HIERRO, etc.
+  const queryMeasures  = extractMeasures(query);
+  const queryExpandSet = new Set(queryExpanded);
+
   const scored = invItems.map(item => {
     const itemTokens = tokenize(item.nombre);
-    const itemSet = new Set(itemTokens), querySet = new Set(queryTokens);
+    const itemSet    = new Set(itemTokens);
     let score = 0;
-    for (const t of queryTokens) if (itemSet.has(t)) score += (idf[t] || 1);
-    for (const t of itemTokens)  if (querySet.has(t)) score += (idf[t] || 1) * 0.5;
+    for (const t of queryExpanded) if (itemSet.has(t)) score += (idf[t] || 1);
+    for (const t of itemTokens)    if (queryExpandSet.has(t)) score += (idf[t] || 1) * 0.5;
     const itemMeasures = extractMeasures(item.nombre);
     if (queryMeasures.size > 0 && itemMeasures.size > 0) {
       const matchingMeasures = [...queryMeasures].filter(m => itemMeasures.has(m)).length;
@@ -182,7 +233,20 @@ function getTopCandidates(invItems, query, idf, N = 10) {
     }
     return { item, score };
   });
-  return scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, N).map(s => s.item);
+
+  const candidates = scored.filter(s => s.score > 0);
+
+  // Bonus de fecha: item con movimiento más reciente recibe hasta +15% de score (no determinante)
+  const dates = candidates.map(s => s.item.fecha_mov).filter(d => d != null);
+  if (dates.length > 1) {
+    const minDate = Math.min(...dates), maxDate = Math.max(...dates);
+    const range = maxDate - minDate || 1;
+    for (const s of candidates) {
+      if (s.item.fecha_mov != null) s.score *= (0.85 + 0.15 * (s.item.fecha_mov - minDate) / range);
+    }
+  }
+
+  return candidates.sort((a, b) => b.score - a.score).slice(0, N).map(s => s.item);
 }
 
 // ── GPT-4o Match ──────────────────────────────────────────────────────────────
@@ -431,12 +495,15 @@ Devuelve SOLO JSON valido con dobles comillas:
           }
         }
 
-        // Peso: tabla de conversión (exacto) → GPT estimate → estimatePeso fallback
+        // Peso: tabla de conversión (exacto, solo si unidad ≠ KG) → GPT estimate → estimatePeso fallback
+        // Unidad KG en la tabla significa que el ítem se vende por KG, no que "1 pieza = 1 KG".
+        // Para esos casos GPT estima el peso real por unidad física (ej: barra, bolsa, rollo...).
         let pesoKgFinal = null;
         let pesoExacto  = false;
         const codigoMatch = (!match || match._soloPeso) ? null : match.codigo;
-        if (codigoMatch && factores?.[codigoMatch]) {
-          pesoKgFinal = factores[codigoMatch];
+        const factor = codigoMatch ? factores?.[codigoMatch] : null;
+        if (factor && factor.unidad !== "KG") {
+          pesoKgFinal = factor.peso;
           pesoExacto  = true;
         } else {
           pesoKgFinal = match?.peso_kg ?? null;
