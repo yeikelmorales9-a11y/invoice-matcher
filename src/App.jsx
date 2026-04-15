@@ -574,7 +574,9 @@ Devuelve SOLO JSON valido con dobles comillas:
         let pesoExacto  = false;
         const codigoMatch = (!match || match._soloPeso) ? null : match.codigo;
         const factor = codigoMatch ? factores?.[codigoMatch] : null;
-        if (factor && factor.unidad !== "KG") {
+        // Unidades que NO aportan peso útil por pieza → buscar con GPT
+        const FACTOR_SIN_PESO = new Set(["KG", "UNIDAD", "UND", "UN", "KILOGRAMO", "KILOGRAMOS", ""]);
+        if (factor && !FACTOR_SIN_PESO.has(factor.unidad)) {
           pesoKgFinal = factor.peso;
           pesoExacto  = true;
         } else {
