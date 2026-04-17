@@ -617,7 +617,7 @@ Formato EXACTO — solo comillas dobles, sin comas finales:
           pesoExacto  = true;
         } else {
           pesoKgFinal = match?.peso_kg ?? null;
-          if (!pesoKgFinal && candidates.length === 0) {
+          if (!pesoKgFinal) {
             pesoKgFinal = await estimatePeso(inv.descripcion);
           }
         }
