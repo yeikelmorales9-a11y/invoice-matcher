@@ -570,6 +570,7 @@ Formato EXACTO — solo comillas dobles, sin comas finales:
 
       setProgTotal(invoiceItems.length);
       const rows = [];
+      const usedCodes = new Set(); // evitar asignar el mismo código a dos items distintos
       for (let idx = 0; idx < invoiceItems.length; idx++) {
         const inv = invoiceItems[idx];
         setProgIdx(idx + 1);
@@ -578,11 +579,16 @@ Formato EXACTO — solo comillas dobles, sin comas finales:
         const vr_usd = inv.valor_unitario ? +(inv.valor_unitario / tasaNum).toFixed(6) : null;
         const candidates = getTopCandidates(inventory, inv.descripcion, idf, 10);
 
+        // Excluir códigos ya asignados para no repetir el mismo item del inventario
+        const availableCandidates = candidates.filter(c => !usedCodes.has(c.codigo));
+        const candidatesForMatch  = availableCandidates.length > 0 ? availableCandidates : candidates;
+
         let match = null, status = "notfound";
-        if (candidates.length > 0) {
-          match = await aiPickBestMatch(inv.descripcion, inv.cantidad, candidates);
+        if (candidatesForMatch.length > 0) {
+          match = await aiPickBestMatch(inv.descripcion, inv.cantidad, candidatesForMatch);
           if (match && !match._soloPeso) {
             status = match.confidence === "high" ? "found" : "verify";
+            usedCodes.add(match.codigo);
           }
         }
 
