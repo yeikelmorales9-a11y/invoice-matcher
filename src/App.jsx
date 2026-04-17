@@ -387,6 +387,21 @@ async function estimatePeso(descripcion) {
 }
 
 // ── Helpers de formato ────────────────────────────────────────────────────────
+// Limpia y parsea JSON que GPT a veces devuelve con problemas menores
+function safeParseJSON(raw) {
+  let text = raw
+    .replace(/```json\s*/gi, "").replace(/```\s*/g, "") // quitar markdown
+    .trim();
+  // Extraer solo el objeto JSON (de { a })
+  const start = text.indexOf("{");
+  const end   = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+  text = text.slice(start, end + 1);
+  // Eliminar comas sobrantes antes de } o ]
+  text = text.replace(/,(\s*[}\]])/g, "$1");
+  try { return JSON.parse(text); } catch { return null; }
+}
+
 function fmtNum(val, dec = 6) {
   if (val == null || val === "") return "";
   return Number(val).toFixed(dec).replace(".", ",");
@@ -512,16 +527,16 @@ export default function App() {
       const pdfText = await pdfToText(pdfFile);
       const isScanned = pdfText.trim().length < 50;
 
-      const INSTRUCCIONES = `INSTRUCCIONES:
+      const INSTRUCCIONES = `INSTRUCCIONES (responde SOLO el objeto JSON, sin texto adicional, sin markdown):
 - cantidad: numero (puede ser decimal si es por metro/kg)
 - valor_unitario: precio unitario NETO en PESOS COP.
-  * Si hay columna de descuento: valor_unitario = precio_unitario × (1 - descuento/100).
-    Ejemplo: precio=72299, descuento=20% → valor_unitario=57839.2
-  * Si hay columna de valor total sin descuento explícito: divide valor_total entre cantidad.
-  * Si no hay columna de precio unitario: divide subtotal entre cantidad.
+  * Si hay columna de descuento: valor_unitario = precio_unitario * (1 - descuento/100).
+    Ejemplo: precio=72299, descuento=20% -> valor_unitario=57839.2
+  * Si hay columna de valor total sin descuento explícito: divide valor_total / cantidad.
+  * Si no hay precio unitario: divide subtotal / cantidad.
 - descripcion: nombre completo con medidas y material (incluir referencia/codigo si aparece)
-Devuelve SOLO JSON valido con dobles comillas:
-{"items":[{"descripcion":"...","cantidad":N,"valor_unitario":N}]}`;
+Formato EXACTO — solo comillas dobles, sin comas finales:
+{"items":[{"descripcion":"...","cantidad":0,"valor_unitario":0}]}`;
 
       let extractMessages;
       if (isScanned) {
@@ -548,9 +563,9 @@ Devuelve SOLO JSON valido con dobles comillas:
       const extractData = await extractResp.json();
       if (!extractResp.ok) throw new Error(`API ${extractResp.status} - ${extractData.error?.message || JSON.stringify(extractData)}`);
 
-      const rawText = extractData.choices[0].message.content.trim().replace(/```json|```/g, "").trim();
-      if (!rawText.startsWith("{")) throw new Error(`GPT no devolvio JSON. Respuesta: ${rawText.substring(0, 200)}`);
-      const parsed = JSON.parse(rawText);
+      const rawText = extractData.choices[0].message.content.trim();
+      const parsed  = safeParseJSON(rawText);
+      if (!parsed) throw new Error(`GPT no devolvio JSON valido. Respuesta: ${rawText.substring(0, 300)}`);
       const invoiceItems = parsed.items || [];
 
       setProgTotal(invoiceItems.length);
