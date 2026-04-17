@@ -514,8 +514,12 @@ export default function App() {
 
       const INSTRUCCIONES = `INSTRUCCIONES:
 - cantidad: numero (puede ser decimal si es por metro/kg)
-- valor_unitario: numero en PESOS COP (si ves subtotal divide entre cantidad)
-- descripcion: nombre completo con medidas y material
+- valor_unitario: precio unitario NETO en PESOS COP.
+  * Si hay columna de descuento: valor_unitario = precio_unitario × (1 - descuento/100).
+    Ejemplo: precio=72299, descuento=20% → valor_unitario=57839.2
+  * Si hay columna de valor total sin descuento explícito: divide valor_total entre cantidad.
+  * Si no hay columna de precio unitario: divide subtotal entre cantidad.
+- descripcion: nombre completo con medidas y material (incluir referencia/codigo si aparece)
 Devuelve SOLO JSON valido con dobles comillas:
 {"items":[{"descripcion":"...","cantidad":N,"valor_unitario":N}]}`;
 
