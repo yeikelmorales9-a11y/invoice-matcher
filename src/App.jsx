@@ -592,16 +592,27 @@ Formato EXACTO — solo comillas dobles, sin comas finales:
           }
         }
 
-        // Peso: tabla de conversión (exacto, solo si unidad ≠ KG) → GPT estimate → estimatePeso fallback
-        // Unidad KG en la tabla significa que el ítem se vende por KG, no que "1 pieza = 1 KG".
-        // Para esos casos GPT estima el peso real por unidad física (ej: barra, bolsa, rollo...).
+        // ── Lógica de peso ────────────────────────────────────────────────────
+        // Apollo UM del item cruzado
+        const umApollo    = (!match || match._soloPeso) ? "" : (match.unidad_manejo?.toUpperCase().trim() || "");
+        const apolloEsKg  = ["KILOGRAMOS", "KILOGRAMO", "KG"].includes(umApollo);
+
+        const codigoMatch = (!match || match._soloPeso) ? null : match.codigo;
+        const factor      = codigoMatch ? factores?.[codigoMatch] : null;
+
+        // Usar factores de conversión SOLO cuando:
+        //   factor.unidad = "KG"  →  la subpartida arancelaria maneja en KG
+        //   Y Apollo NO es KG     →  Apollo maneja en UNIDAD, factores da la conversión real
+        //
+        // Usar GPT cuando:
+        //   factor.unidad = "UNIDAD" (subpartida y Apollo en UNIDAD → buscar peso en internet)
+        //   Apollo UM = KILOGRAMOS   (vendido por peso, factor 1/1 no aporta kg/pieza)
+        //   sin entry en factores    (fallback GPT)
+        const usarFactores = factor && factor.unidad === "KG" && !apolloEsKg;
+
         let pesoKgFinal = null;
         let pesoExacto  = false;
-        const codigoMatch = (!match || match._soloPeso) ? null : match.codigo;
-        const factor = codigoMatch ? factores?.[codigoMatch] : null;
-        // Unidades que NO aportan peso útil por pieza → buscar con GPT
-        const FACTOR_SIN_PESO = new Set(["KG", "UNIDAD", "UND", "UN", "KILOGRAMO", "KILOGRAMOS", ""]);
-        if (factor && !FACTOR_SIN_PESO.has(factor.unidad)) {
+        if (usarFactores) {
           pesoKgFinal = factor.peso;
           pesoExacto  = true;
         } else {
@@ -612,7 +623,7 @@ Formato EXACTO — solo comillas dobles, sin comas finales:
         }
 
         const cantFinal = match?._soloPeso ? inv.cantidad : (match?.cantidad_ajustada ?? inv.cantidad);
-        const umEsKg    = match?.unidad_manejo?.toUpperCase() === "KILOGRAMOS";
+        const umEsKg    = apolloEsKg;
 
         // Peso total:
         // - UM=KILOGRAMOS y GPT ajustó cantidad → cantidad_ajustada YA ES el total en KG (no multiplicar de nuevo)
